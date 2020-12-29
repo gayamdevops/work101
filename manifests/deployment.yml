@@ -1,0 +1,19 @@
+apiVersion : apps/v1
+kind: Deployment
+metadata:
+  name: "cluster1-6ee6"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: "cluster1-6ee6"
+  template:
+    metadata:
+      labels:
+        app: "cluster1-6ee6"
+    spec:
+      containers:
+        - name: "cluster1-6ee6"
+          image: "clustercon1.azurecr.io/cluster1"
+          ports:
+          - containerPort: 9090
