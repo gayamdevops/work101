@@ -1,0 +1,63 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    
+    - uses: actions/checkout@master
+    
+    - uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create ACR
+      id: create-acr
+      run: |
+        az acr create -n clustercon1 -g clustercon1b346-rg --location "East US" --sku Standard --admin-enabled
+        echo "::set-output name=acr_username::`az acr credential show -n clustercon1 --query username | xargs`"
+        echo "::set-output name=acr_password::`az acr credential show -n clustercon1 --query passwords[0].value | xargs`"
+        echo "::add-mask::`az acr credential show -n clustercon1 --query passwords[0].value | xargs`"
+
+    - uses: azure/docker-login@v1
+      with:
+        login-server: clustercon1.azurecr.io
+        username: ${{ steps.create-acr.outputs.acr_username }}
+        password: ${{ steps.create-acr.outputs.acr_password }}
+
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/gameoflife-acceptance-tests" -f  "gameoflife-acceptance-tests/Dockerfile" -t clustercon1.azurecr.io/cluster1:${{ github.sha }}
+        docker push clustercon1.azurecr.io/cluster1:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      id: login
+      with:
+         kubeconfig: ${{ secrets.aks_cluster1_kubeConfig }}
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep cluster19305 | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace cluster19305`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: cluster19305
+        container-registry-url: clustercon1.azurecr.io
+        container-registry-username: ${{ steps.create-acr.outputs.acr_username }}
+        container-registry-password: ${{ steps.create-acr.outputs.acr_password }}
+        secret-name: cluster1dockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: cluster19305
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+        images: |
+          clustercon1.azurecr.io/cluster1:${{ github.sha }}
+        imagepullsecrets: |
+          cluster1dockerauth
